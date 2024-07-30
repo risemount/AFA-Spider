@@ -4,9 +4,13 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from call_db import *
 
-
-
-def afa_scratch(savepath: str, mode: str, year: str, item: str, crop: str, city: str):
+class survey_data():
+    def __init__(self, data):
+        self.header = data[0]
+        self.unit = [""].append(data[1])
+        self.status = data[2:-1]
+    
+def afa_scratch(savepath: str, mode: str, export: str, year: str, item: str, crop: str, city: str):
 
     opt = Option(options_in_db(type_=mode))
 
@@ -66,11 +70,47 @@ def afa_scratch(savepath: str, mode: str, year: str, item: str, crop: str, city:
     # Create a DataFrame with the extracted data
     # First row of data contains the headers
     if not ['查無資料！！'] in data:
-        df = pd.DataFrame(data[1:], columns=data[0])
-        
-        try:
-            df.to_csv(os.path.join(savepath, f"{opt.value_dict("crop")[crop]}_{opt.value_dict("year")[year]}_{opt.value_dict("city")[city]}_{opt.value_dict("item")[item]}.csv"), index = False, encoding = 'big5')
-        except UnicodeEncodeError as err:
-            print(f"{(year, item, crop)} got error: {err}")
+        data_obj = survey_data(data)
+        df = pd.DataFrame(data_obj.status, columns=data_obj.header)
+        if export == "multiple":
+            try:
+                df.to_csv(os.path.join(savepath, f"{opt.value_dict("crop")[crop]}_{opt.value_dict("year")[year]}_{opt.value_dict("city")[city]}_{opt.value_dict("item")[item]}.csv"), index = False, encoding = 'big5')
+            except UnicodeEncodeError as err:
+                print(f"{(year, item, crop)} got error: {err}")
+        else:
+            return data_obj
+    else:
+        return None
 
-    return 0
+class DataContainer:
+    def __init__(self, mode):
+        self._data = []
+        self.mode = mode
+        self.opt = Option(options_in_db(type_=mode))
+    
+    def register(self, year: str, item: str, crop: str, status_data: survey_data):
+        """Register a new data entry."""
+        for status_entry in status_data.status:
+            entry = {
+                '年度': self.opt.value_dict("year")[year],
+                '期作': self.opt.value_dict("item")[item],
+                '作物': self.opt.value_dict("crop")[crop]
+            }
+            # Assuming status_entry is a list of key-value pairs or a list with consistent structure
+            if "town" == self.mode[4:]:
+                for idx, value in enumerate(status_entry, start=0):
+                    if idx == 0:
+                        cityname = value[:3]
+                        townname = value[3:]
+                        entry['縣市名稱'] = cityname
+                        entry['鄉鎮市(區)'] = townname
+                    else:
+                        entry[status_data.header[idx]] = value
+            elif "city" == self.mode[4:]:
+                for idx, value in enumerate(status_entry, start=0):                
+                    entry[status_data.header[idx]] = value
+            self._data.append(entry)
+
+    def to_dataframe(self):
+        """Convert the registered data to a Pandas DataFrame."""
+        return pd.DataFrame(self._data)

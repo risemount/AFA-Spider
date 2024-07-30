@@ -9,7 +9,7 @@ from PIL import Image
 from time import sleep
 from call_db import options_in_db, Option
 from update_numbers import update_database, create_option_db
-from scraping_functions import afa_scratch
+from scraping_functions import afa_scratch, survey_data, DataContainer
 from itertools import product
 
 import gettext
@@ -60,9 +60,21 @@ class MainFrame ( wx.Frame ):
         self.current_options = Option(options_in_db(type_ = self.mode))
 
         self.Edit_menu.AppendSubMenu( self.mode_menu, _(u"查詢模式") )
-
+        ##
         self.store_menu = wx.MenuItem( self.Edit_menu, wx.ID_ANY, _(u"儲存至"), wx.EmptyString, wx.ITEM_NORMAL )
         self.Edit_menu.Append( self.store_menu )
+        ##
+        self.export_menu = wx.Menu()
+        self.multiplefile_menuItem = wx.MenuItem( self.export_menu, wx.ID_ANY, _(u"各別輸出"), wx.EmptyString, wx.ITEM_RADIO )
+        self.export_menu.Append( self.multiplefile_menuItem )
+
+        self.singlefile_menuItem = wx.MenuItem( self.export_menu, wx.ID_ANY, _(u"整理為單一資料"), wx.EmptyString, wx.ITEM_RADIO )
+        self.export_menu.Append( self.singlefile_menuItem )
+
+        self.export_mode = "multiple"; self.multiplefile_menuItem.Enable(enable=False)
+
+        self.Edit_menu.AppendSubMenu( self.export_menu, "輸出資料")
+        ##
         self.update_db_menu = wx.MenuItem( self.Edit_menu, wx.ID_ANY, _(u"更新選項資料庫"), wx.EmptyString, wx.ITEM_NORMAL )
         self.Edit_menu.Append( self.update_db_menu )
 
@@ -257,6 +269,8 @@ class MainFrame ( wx.Frame ):
         self.Bind( wx.EVT_MENU, self.town_menuItem2OnMenuSelection, id = self.town_menuItem2.GetId() )
         self.Bind( wx.EVT_MENU, self.city_menuItem2OnMenuSelection, id = self.city_menuItem2.GetId() )
         self.Bind( wx.EVT_MENU, self.store_menuOnMenuSelection, id = self.store_menu.GetId() )
+        self.Bind( wx.EVT_MENU, self.multiplefile_menuItemOnMenuSelection, id = self.multiplefile_menuItem.GetId() )
+        self.Bind( wx.EVT_MENU, self.singlefile_menuItemOnMenuSelection, id = self.singlefile_menuItem.GetId() )
         self.Bind( wx.EVT_MENU, self.update_db_menuOnMenuSelection, id = self.update_db_menu.GetId() )
         self.Bind( wx.EVT_MENU, self.info_menuItemOnMenuSelection, id = self.info_menuItem.GetId() )
         self.update_button.Bind( wx.EVT_BUTTON, self.update_buttonOnButtonClick )
@@ -315,6 +329,16 @@ class MainFrame ( wx.Frame ):
             store_to_panel.Show()
         except Exception as e:
             wx.LogError(f"Failed to open Info Frame: {str(e)}")
+
+    def multiplefile_menuItemOnMenuSelection( self, event):
+        self.export_mode = "multiple"
+        self.multiplefile_menuItem.Enable(enable=False)
+        self.singlefile_menuItem.Enable(enable=True)
+
+    def singlefile_menuItemOnMenuSelection( self, event):
+        self.export_mode = "single"
+        self.multiplefile_menuItem.Enable(enable=True)
+        self.singlefile_menuItem.Enable(enable=False)
 
     def update_db_menuOnMenuSelection( self, event):
         update_database()
@@ -481,12 +505,24 @@ class MainFrame ( wx.Frame ):
         # Calculate the total number of combinations
         total_combinations = len(search_payload['year']) * len(search_payload['item']) * len(search_payload['crop']) * len(search_payload['city'])
         
+        dataset = DataContainer(mode = self.mode)
         # Iterate through the combinations with a progress bar
         for count, (a, b, c, d) in enumerate(combinations, start=1):
             sleep(0.05)
-            afa_scratch(savepath=self.save_to_path, mode=self.mode, year=a, item=b, crop=c, city=d)
+            if self.export_mode == "multiple":
+                afa_scratch(savepath=self.save_to_path, mode=self.mode, export=self.export_mode, year=a, item=b, crop=c, city=d)
+            elif self.export_mode == "single":
+                _data = afa_scratch(savepath=self.save_to_path, mode=self.mode, export=self.export_mode, year=a, item=b, crop=c, city=d)
+                if not _data is None:
+                    dataset.register(year = a, item = b, crop = c, status_data = _data)
+
             # wx.CallAfter(self.update_progress_bar, count, total_combinations)
             wx.CallAfter(self.update_progress_bar, count, total_combinations)
+
+        if self.export_mode == "single":
+            df = dataset.to_dataframe()
+            df.to_csv(f"{self.save_to_path}/batch_data.csv", index=False, encoding='big5')
+        
 
 
 
